@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Gray-Scott Reaction Diffusion</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a0f;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    color: #e2e2ea;
+    overflow: hidden;
+  }
+  canvas {
+    border: 1px solid #2a2a38;
+    image-rendering: pixelated;
+  }
+  #controls {
+    display: flex;
+    gap: 16px;
+    margin-top: 16px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  button {
+    padding: 6px 16px;
+    border-radius: 6px;
+    border: 1px solid #2a2a38;
+    background: #1a1a22;
+    color: #e2e2ea;
+    cursor: pointer;
+    font-size: 0.85rem;
+    transition: border-color 0.1s, background 0.1s;
+  }
+  button:hover { border-color: #f5e642; background: #22221a; }
+  button.active { border-color: #f5e642; color: #f5e642; }
+  #label {
+    font-size: 0.75rem;
+    color: #707070;
+    margin-top: 8px;
+    letter-spacing: 0.04em;
+  }
+</style>
+</head>
+<body>
+
+<canvas id="c"></canvas>
+<div id="controls">
+  <button onclick="setPreset('coral')" id="btn-coral">Coral</button>
+  <button onclick="setPreset('spots')" id="btn-spots">Spots</button>
+  <button onclick="setPreset('stripes')" id="btn-stripes">Stripes</button>
+  <button onclick="setPreset('worms')" id="btn-worms">Worms</button>
+  <button onclick="setPreset('maze')" id="btn-maze">Maze</button>
+  <button onclick="reset()">Reset</button>
+</div>
+<div id="label">Gray-Scott reaction-diffusion · click canvas to seed</div>
+
+<script>
+const W = 300, H = 300;
+const canvas = document.getElementById('c');
+canvas.width = W; canvas.height = H;
+canvas.style.width = '540px'; canvas.style.height = '540px';
+const ctx = canvas.getContext('2d');
+const img = ctx.createImageData(W, H);
+
+// Gray-Scott parameters: { f: feed rate, k: kill rate }
+const presets = {
+  coral:   { f: 0.0545, k: 0.062 },
+  spots:   { f: 0.035,  k: 0.065 },
+  stripes: { f: 0.022,  k: 0.051 },
+  worms:   { f: 0.078,  k: 0.061 },
+  maze:    { f: 0.029,  k: 0.057 },
+};
+
+let Du = 0.2097, Dv = 0.105;
+let f = presets.coral.f, k = presets.coral.k;
+let currentPreset = 'coral';
+
+let U = new Float32Array(W * H);
+let V = new Float32Array(W * H);
+let Un = new Float32Array(W * H);
+let Vn = new Float32Array(W * H);
+
+function reset() {
+  U.fill(1); V.fill(0);
+  // seed a few random blobs
+  for (let s = 0; s < 8; s++) {
+    const cx = Math.random() * W | 0;
+    const cy = Math.random() * H | 0;
+    for (let dy = -6; dy <= 6; dy++) {
+      for (let dx = -6; dx <= 6; dx++) {
+        const x = (cx + dx + W) % W;
+        const y = (cy + dy + H) % H;
+        const i = y * W + x;
+        U[i] = 0.5 + (Math.random() - 0.5) * 0.1;
+        V[i] = 0.25 + (Math.random() - 0.5) * 0.1;
+      }
+    }
+  }
+}
+
+function setPreset(name) {
+  f = presets[name].f;
+  k = presets[name].k;
+  currentPreset = name;
+  document.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+  document.getElementById('btn-' + name)?.classList.add('active');
+  reset();
+}
+
+function step(n) {
+  for (let iter = 0; iter < n; iter++) {
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const i = y * W + x;
+        const xL = (x - 1 + W) % W, xR = (x + 1) % W;
+        const yT = (y - 1 + H) % H, yB = (y + 1) % H;
+
+        const lapU = U[yT*W+x] + U[yB*W+x] + U[y*W+xL] + U[y*W+xR] - 4*U[i];
+        const lapV = V[yT*W+x] + V[yB*W+x] + V[y*W+xL] + V[y*W+xR] - 4*V[i];
+
+        const uvv = U[i] * V[i] * V[i];
+        Un[i] = U[i] + Du * lapU - uvv + f * (1 - U[i]);
+        Vn[i] = V[i] + Dv * lapV + uvv - (f + k) * V[i];
+        if (Un[i] < 0) Un[i] = 0;
+        if (Vn[i] < 0) Vn[i] = 0;
+        if (Un[i] > 1) Un[i] = 1;
+        if (Vn[i] > 1) Vn[i] = 1;
+      }
+    }
+    [U, Un] = [Un, U];
+    [V, Vn] = [Vn, V];
+  }
+}
+
+// Colour map: deep navy → teal → gold → white
+function colorMap(v) {
+  v = Math.max(0, Math.min(1, v));
+  if (v < 0.33) {
+    const t = v / 0.33;
+    return [lerp(10, 0, t), lerp(10, 90, t), lerp(30, 120, t)];
+  } else if (v < 0.66) {
+    const t = (v - 0.33) / 0.33;
+    return [lerp(0, 245, t), lerp(90, 230, t), lerp(120, 66, t)];
+  } else {
+    const t = (v - 0.66) / 0.34;
+    return [lerp(245, 255, t), lerp(230, 255, t), lerp(66, 255, t)];
+  }
+}
+function lerp(a, b, t) { return a + (b - a) * t | 0; }
+
+function draw() {
+  for (let i = 0; i < W * H; i++) {
+    const [r, g, b] = colorMap(V[i] * 3.5);
+    const p = i * 4;
+    img.data[p]   = r;
+    img.data[p+1] = g;
+    img.data[p+2] = b;
+    img.data[p+3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+canvas.addEventListener('click', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const cx = ((e.clientX - rect.left) / rect.width * W) | 0;
+  const cy = ((e.clientY - rect.top) / rect.height * H) | 0;
+  for (let dy = -5; dy <= 5; dy++) {
+    for (let dx = -5; dx <= 5; dx++) {
+      const x = (cx + dx + W) % W;
+      const y = (cy + dy + H) % H;
+      const i = y * W + x;
+      U[i] = 0.5; V[i] = 0.25;
+    }
+  }
+});
+
+let running = true;
+function loop() {
+  if (running) {
+    step(8);
+    draw();
+  }
+  requestAnimationFrame(loop);
+}
+
+setPreset('coral');
+loop();
+</script>
+</body>
+</html>
